@@ -1,0 +1,109 @@
+using System;
+using System.Security.Cryptography;
+using Akka.Actor;
+
+namespace BitcoinMiner
+{
+    // Message to start the mining process
+    public class StartMining { }
+
+    // Message to store a validated hash
+    public class StoreHash
+    {
+        public string Hash { get; }
+
+        public StoreHash(string hash)
+        {
+            Hash = hash;
+        }
+    }
+
+    // Mining actor
+    public class MiningActor : ReceiveActor
+    {
+        private readonly Random _random = new Random();
+
+        public MiningActor()
+        {
+            Receive<StartMining>(_ =>
+            {
+                // Start the mining process
+                Mine();
+            });
+        }
+
+        private void Mine()
+        {
+            // Generate random data for hashing
+            byte[] data = new byte[16];
+            _random.NextBytes(data);
+
+            // Generate hashes by varying nonce values
+            for (int nonce = 0; nonce < int.MaxValue; nonce++)
+            {
+                string hash = CalculateHash(data, nonce);
+
+                // Validate the hash
+                if (ValidateHash(hash))
+                {
+                    // Send the valid hash to the storage actor
+                    Context.ActorSelection("/user/storageActor").Tell(new StoreHash(hash));
+                }
+            }
+        }
+
+        private string CalculateHash(byte[] data, int nonce)
+        {
+            byte[] combined = new byte[data.Length + sizeof(int)];
+            Array.Copy(data, combined, data.Length);
+            BitConverter.GetBytes(nonce).CopyTo(combined, data.Length);
+
+            using (SHA256 sha256 = SHA256.Create())
+            {
+                byte[] hashBytes = sha256.ComputeHash(combined);
+                return BitConverter.ToString(hashBytes).Replace("-", "");
+            }
+        }
+
+        private bool ValidateHash(string hash)
+        {
+            // Check if the hash meets the difficulty target
+            return hash.StartsWith("0000"); // Example difficulty target (4 leading zeros)
+        }
+    }
+
+    // Storage actor
+    public class StorageActor : ReceiveActor
+    {
+        public StorageActor()
+        {
+            Receive<StoreHash>(message =>
+            {
+                // Store the validated hash in a database or blockchain
+                Console.WriteLine($"Stored hash: {message.Hash}");
+            });
+        }
+    }
+
+    class Program
+    {
+        static void Main(string[] args)
+        {
+            // Create the actor system
+            using (var system = ActorSystem.Create("BitcoinMinerSystem"))
+            {
+                // Create the storage actor
+                var storageActor = system.ActorOf<StorageActor>("storageActor");
+
+                // Create the mining actor
+                var miningActor = system.ActorOf<MiningActor>("miningActor");
+
+                // Start the mining process by sending a message to the mining actor
+                miningActor.Tell(new StartMining());
+
+                // Keep the program running to allow mining to continue
+                Console.ReadLine();
+            }
+        }
+    }
+}
